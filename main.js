@@ -1,30 +1,58 @@
 var seen = {};
+var ISRC_RE = /^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/;
 
-function remember(track) {
-  if (track && track.uri && track.isrc) seen[track.uri] = track.isrc;
-}
-
-function methodsOf(obj) {
-  var out = [];
-  try { out = Object.getOwnPropertyNames(obj); } catch (err) {}
-  if (!out.length) {
-    try { for (var k in obj) out.push(k); } catch (err2) { out.push('error: ' + err2); }
+// Digs through whatever Spotify returns and picks out something shaped like an ISRC.
+function findIsrc(value, depth) {
+  if (value === null || value === undefined || depth > 4) return null;
+  if (typeof value === 'string') {
+    var s = value.replace(/[- ]/g, '').toUpperCase();
+    return ISRC_RE.test(s) ? s : null;
   }
-  return out.join(', ');
+  if (typeof value === 'object') {
+    if (value.isrc) {
+      var direct = findIsrc(value.isrc, depth + 1);
+      if (direct) return direct;
+    }
+    for (var k in value) {
+      var r = findIsrc(value[k], depth + 1);
+      if (r) return r;
+    }
+  }
+  return null;
 }
 
-// Ask the app which Spotify commands exist, and log them.
-try {
-  myspoti.log('catalog methods: ' + methodsOf(myspoti.spotify.catalog));
-  myspoti.log('search methods: ' + methodsOf(myspoti.spotify.search));
-} catch (err) {
-  myspoti.log('methods failed: ' + err);
+// Asks Spotify's catalogue for the ISRC, trying a few ways and logging each.
+function lookup(uri) {
+  if (!uri) return null;
+  if (seen[uri]) return seen[uri];
+  var id = String(uri).split(':').pop();
+  var tries = [
+    ['catalog.isrc(uri)', function () { return myspoti.spotify.catalog.isrc(uri); }],
+    ['catalog.isrc(id)', function () { return myspoti.spotify.catalog.isrc(id); }],
+    ['catalog.track(uri)', function () { return myspoti.spotify.catalog.track(uri); }],
+    ['catalog.track(id)', function () { return myspoti.spotify.catalog.track(id); }]
+  ];
+  for (var i = 0; i < tries.length; i++) {
+    try {
+      var result = tries[i][1]();
+      var text = JSON.stringify(result);
+      myspoti.log(tries[i][0] + ' -> ' + (text ? text.slice(0, 300) : String(result)));
+      var found = findIsrc(result, 0);
+      if (found) {
+        seen[uri] = found;
+        myspoti.log('ISRC found via ' + tries[i][0] + ': ' + found);
+        return found;
+      }
+    } catch (err) {
+      myspoti.log(tries[i][0] + ' failed: ' + err);
+    }
+  }
+  return null;
 }
 
-myspoti.on('track', function (track) {
-  remember(track);
-  myspoti.log('track: ' + JSON.stringify(track));
-});
+function say(text) {
+  try { myspoti.notify(text); } catch (err) { myspoti.log('notify blocked: ' + err); }
+}
 
 myspoti.provide('menu', function (item) {
   if (item.kind !== 'track') return [];
@@ -33,15 +61,14 @@ myspoti.provide('menu', function (item) {
 
 myspoti.provide('tap', function (e) {
   if (e.action !== 'show_isrc') return;
-  myspoti.log('tap: ' + JSON.stringify(e));
-  var now = null;
-  try { now = myspoti.player.current(); } catch (err) { myspoti.log('current failed: ' + err); }
-  myspoti.log('current: ' + JSON.stringify(now));
+  var uri = e.context && e.context.uri;
+  var isrc = lookup(uri);
+  myspoti.log('tap result for ' + uri + ': ' + isrc);
+  say(isrc ? 'ISRC: ' + isrc : 'ISRC not found for this song');
 });
 
 myspoti.provide('trackinfo', function (track) {
-  myspoti.log('trackinfo: ' + JSON.stringify(track));
-  remember(track);
-  if (!track.isrc) return null;
-  return [{ type: 'text', text: 'ISRC: ' + track.isrc, style: 'body' }];
+  var isrc = track.isrc || lookup(track.uri);
+  if (!isrc) return null;
+  return [{ type: 'text', text: 'ISRC: ' + isrc, style: 'body' }];
 });
