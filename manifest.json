@@ -1,0 +1,13 @@
+{
+  "id": "io.github.senura.isrc",
+  "name": "ISRC Check",
+  "version": "1.0.0",
+  "author": "Senura",
+  "description": "Shows the ISRC of a song from its menu.",
+  "actions": [
+    { "name": "menu.items", "why": "Adds a Show ISRC entry to song menus" },
+    { "name": "trackinfo.provide", "why": "Shows the ISRC under the song details" },
+    { "name": "playback.events", "why": "Learns each song's ISRC as it plays" },
+    { "name": "notify", "why": "Shows the ISRC on screen" }
+  ]
+}
